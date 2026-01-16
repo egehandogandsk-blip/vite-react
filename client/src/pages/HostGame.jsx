@@ -1,33 +1,50 @@
-import React, { useState, useContext } from 'react';
+import React, { useState } from 'react';
 import { TextField, Button, Container, Box, Typography, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { SocketContext } from '../App';
+import { ref, set, get } from "firebase/database";
+import { db } from '../firebase';
+import { v4 as uuidv4 } from 'uuid'; // We need uuid for host ID since no socket ID
+
+// Simple UUID generator if uuid package not installed (it was in server package but check client)
+// Client didn't have uuid installed in previous steps, let's use a simple random string function
+function generateId() {
+    return Math.random().toString(36).substr(2, 9);
+}
 
 function HostGame() {
     const [gameName, setGameName] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
-    const socket = useContext(SocketContext);
     const navigate = useNavigate();
 
-    const handleCreate = () => {
+    const handleCreate = async () => {
         if (!gameName || !password) {
             setError("Lütfen oyun adı ve şifre giriniz.");
             return;
         }
 
-        socket.emit('create_game', { gameName, password });
+        const roomRef = ref(db, 'rooms/' + password);
 
-        socket.once('game_created', (data) => {
-            // Navigate to game room
-            // We pass state or just let the socket state handle it via useEffect in GameRoom
-            // But passing necessary info via location state is safer
-            navigate('/game', { state: { password, isHost: true } });
+        // Check if room exists
+        const snapshot = await get(roomRef);
+        if (snapshot.exists()) {
+            setError("Bu şifre ile oda zaten mevcut. Başka bir şifre deneyin.");
+            return;
+        }
+
+        const hostId = generateId();
+
+        // Create Room
+        await set(roomRef, {
+            gameName,
+            password,
+            hostId,
+            isStarted: false,
+            players: {} // Firebase stores lists as objects or arrays
         });
 
-        socket.once('error', (msg) => {
-            setError(msg);
-        });
+        // Navigate
+        navigate('/game', { state: { password, isHost: true, myPlayerId: hostId } });
     };
 
     return (
@@ -40,7 +57,7 @@ function HostGame() {
                 gap: 3
             }}>
                 <Typography variant="h4" gutterBottom>
-                    Oyun Oluştur
+                    Oyun Oluştur (Firebase)
                 </Typography>
 
                 {error && <Alert severity="error">{error}</Alert>}

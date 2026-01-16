@@ -1,114 +1,125 @@
-import React, { useEffect, useState, useContext } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
     Box, Container, Typography, Button, List, ListItem,
-    ListItemText, ListItemAvatar, Avatar, Paper, Grid,
-    Dialog, DialogTitle, DialogActions
+    ListItemText, ListItemAvatar, Avatar, Paper, Dialog, DialogTitle, DialogActions
 } from '@mui/material';
-import { SocketContext } from '../App';
+import { ref, onValue, update, remove, push, set } from "firebase/database";
+import { db } from '../firebase';
 
 function GameRoom() {
     const { state } = useLocation();
     const navigate = useNavigate();
-    const socket = useContext(SocketContext);
 
+    const [roomData, setRoomData] = useState(null);
     const [players, setPlayers] = useState([]);
-    const [gameStarted, setGameStarted] = useState(false);
     const [selectedCell, setSelectedCell] = useState(null);
-    const [revealedCells, setRevealedCells] = useState({}); // { playerId: cellId }
 
-    // Request handling
-    const [requestDialog, setRequestDialog] = useState(null); // { requesterId }
+    // Requests: We listen to rooms/password/requests
+    const [requestDialog, setRequestDialog] = useState(null);
 
-    // derived from state
-    const isHost = state?.isHost;
     const password = state?.password;
-    const myPlayerId = socket.id;
+    const myPlayerId = state?.myPlayerId;
+    const isHost = state?.isHost;
 
     useEffect(() => {
-        if (!password) {
+        if (!password || !myPlayerId) {
             navigate('/');
             return;
         }
 
-        // Listeners
-        socket.on('player_list_update', (list) => {
-            setPlayers(list);
+        const roomRef = ref(db, 'rooms/' + password);
+
+        const unsubscribe = onValue(roomRef, (snapshot) => {
+            const data = snapshot.val();
+            if (!data) {
+                // Room deleted
+                alert("Oyun sonlandırıldı.");
+                navigate('/');
+                return;
+            }
+            setRoomData(data);
+
+            // Convert players object to array
+            const playersList = data.players ? Object.values(data.players) : [];
+            setPlayers(playersList);
+
+            // Check Requests targeting ME
+            if (data.requests) {
+                Object.entries(data.requests).forEach(([reqKey, reqVal]) => {
+                    if (reqVal.to === myPlayerId && reqVal.status === 'pending') {
+                        setRequestDialog({ ...reqVal, key: reqKey });
+                    }
+                });
+            }
         });
 
-        socket.on('game_started', () => {
-            setGameStarted(true);
-        });
-
-        socket.on('game_ended', () => {
-            alert("Oyun Host tarafından sonlandırıldı.");
-            navigate('/');
-        });
-
-        socket.on('reveal_request_received', ({ requesterId }) => {
-            setRequestDialog({ requesterId });
-        });
-
-        socket.on('reveal_granted', ({ targetId, cellId }) => {
-            setRevealedCells(prev => ({ ...prev, [targetId]: cellId }));
-            alert(`Oyuncunun kapısı açıldı: Hücre ${cellId}`);
-        });
-
-        socket.on('player_state_update', ({ playerId, hasSelected }) => {
-            // Update player list UI to show they are ready? 
-            // For now, we update local players list logic if needed
-            setPlayers(prev => prev.map(p => p.id === playerId ? { ...p, hasSelected } : p));
-        });
-
-        return () => {
-            socket.off('player_list_update');
-            socket.off('game_started');
-            socket.off('game_ended');
-            socket.off('reveal_request_received');
-            socket.off('reveal_granted');
-            socket.off('player_state_update');
-        };
-    }, [socket, password, navigate]);
+        return () => unsubscribe();
+    }, [password, myPlayerId, navigate]);
 
     const handleStartGame = () => {
-        socket.emit('start_game', { password });
+        update(ref(db, 'rooms/' + password), { isStarted: true });
     };
 
     const handleEndGame = () => {
-        if (confirm("Oyunu bitirmek istediğinize emin misiniz? Herkes odadan atılacak.")) {
-            socket.emit('end_game', { password });
+        if (confirm("Oyunu bitirmek istediğinize emin misiniz?")) {
+            remove(ref(db, 'rooms/' + password));
         }
     };
 
     const handleSelectCell = (cellId) => {
-        if (selectedCell === cellId) return; // Toggle?
+        if (selectedCell === cellId) return;
         setSelectedCell(cellId);
-        socket.emit('select_cell', { password, cellId });
+        // Update my selected cell
+        update(ref(db, `rooms/${password}/players/${myPlayerId}`), { selectedCell: cellId });
     };
 
     const handleExitRoom = () => {
         setSelectedCell(null);
-        socket.emit('select_cell', { password, cellId: null }); // Unselect logic if server supported
+        update(ref(db, `rooms/${password}/players/${myPlayerId}`), { selectedCell: "" });
     };
 
     const handleRequestReveal = (targetPlayerId) => {
         if (targetPlayerId === myPlayerId) return;
-        socket.emit('request_reveal', { password, targetPlayerId });
+        push(ref(db, `rooms/${password}/requests`), {
+            from: myPlayerId,
+            to: targetPlayerId,
+            status: 'pending'
+        });
         alert("İstek gönderildi.");
     };
 
     const handleRespondReveal = (accepted) => {
         if (requestDialog) {
-            socket.emit('respond_reveal', {
-                password,
-                requesterId: requestDialog.requesterId,
-                accepted
-            });
+            // Update request status
+            const reqRef = ref(db, `rooms/${password}/requests/${requestDialog.key}`);
+            update(reqRef, { status: accepted ? 'accepted' : 'rejected' });
+
+            if (accepted) {
+                // Grant permission: Add requester to my revealedTo list
+                // storing as { requesterId: true }
+                update(ref(db, `rooms/${password}/players/${myPlayerId}/revealedTo`), {
+                    [requestDialog.from]: true
+                });
+            }
+
             setRequestDialog(null);
         }
     };
 
-    // Grid Generation: 19 rows x 21 cols
+    // Logic to determine what I can see
+    // I can see my cell.
+    // I can see cell of players who have ME in their 'revealedTo' list.
+
+    const getVisibleCell = (player) => {
+        if (player.id === myPlayerId) return selectedCell; // Local state for immediate feedback
+        // Check if player revealed to me
+        if (player.revealedTo && player.revealedTo[myPlayerId]) {
+            return player.selectedCell;
+        }
+        return null;
+    };
+
     const rows = 19;
     const cols = 21;
     const renderGrid = () => {
@@ -117,13 +128,14 @@ function GameRoom() {
             const rowCells = [];
             for (let c = 0; c < cols; c++) {
                 const cellId = `${r}-${c}`;
-                const isSelected = selectedCell === cellId;
-                // Check if this cell is revealed for any player
-                // revealedCells is { playerId: cellId }
-                // We want to show WHO is there.
-                const occupants = Object.entries(revealedCells)
-                    .filter(([pid, cid]) => cid === cellId)
-                    .map(([pid]) => players.find(p => p.id === pid));
+
+                // Find players on this cell THAT I CAN SEE
+                const occupants = players.filter(p => {
+                    const visibleCell = getVisibleCell(p);
+                    return visibleCell === cellId;
+                });
+
+                const isMySelection = selectedCell === cellId;
 
                 rowCells.push(
                     <Box
@@ -133,7 +145,7 @@ function GameRoom() {
                             width: 30,
                             height: 30,
                             border: '1px solid #444',
-                            bgcolor: isSelected ? 'primary.main' : 'background.paper',
+                            bgcolor: isMySelection ? 'primary.main' : 'background.paper',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -143,11 +155,12 @@ function GameRoom() {
                         }}
                     >
                         {occupants.map((p, i) => (
-                            <Box key={p?.id || i} sx={{
+                            <Box key={p.id} sx={{
                                 width: 10, height: 10,
                                 borderRadius: '50%',
-                                bgcolor: p?.color || 'white',
-                                position: 'absolute'
+                                bgcolor: p.color || 'white',
+                                position: 'absolute',
+                                left: i * 5 // stacking offset
                             }} />
                         ))}
                     </Box>
@@ -158,10 +171,12 @@ function GameRoom() {
         return grid;
     };
 
-    if (!gameStarted) {
+    if (!roomData) return <Typography>Yükleniyor...</Typography>;
+
+    if (!roomData.isStarted) {
         return (
             <Container maxWidth="sm" sx={{ mt: 4, textAlign: 'center' }}>
-                <Typography variant="h4" gutterBottom>Lobi: {state?.gameName || password}</Typography>
+                <Typography variant="h4" gutterBottom>Lobi: {roomData.gameName}</Typography>
                 <Typography variant="subtitle1">Şifre: {password}</Typography>
                 <Box sx={{ my: 4 }}>
                     <Typography variant="h6">Oyuncular ({players.length})</Typography>
@@ -171,7 +186,7 @@ function GameRoom() {
                                 <ListItemAvatar>
                                     <Avatar sx={{ bgcolor: p.color }}>{p.name[0]}</Avatar>
                                 </ListItemAvatar>
-                                <ListItemText primary={p.name} secondary={p.id === state?.hostId ? 'Host' : 'Oyuncu'} />
+                                <ListItemText primary={p.name} secondary={p.id === roomData.hostId ? 'Host' : 'Oyuncu'} />
                             </ListItem>
                         ))}
                     </List>
@@ -194,22 +209,25 @@ function GameRoom() {
             <Paper sx={{ width: 250, p: 2, overflowY: 'auto' }} elevation={3}>
                 <Typography variant="h6" gutterBottom>Oyuncular</Typography>
                 <List>
-                    {players.map((p) => (
-                        <ListItem
-                            key={p.id}
-                            button
-                            onClick={() => handleRequestReveal(p.id)}
-                            disabled={p.id === myPlayerId}
-                        >
-                            <ListItemAvatar>
-                                <Avatar sx={{ bgcolor: p.color }}>{p.name[0]}</Avatar>
-                            </ListItemAvatar>
-                            <ListItemText
-                                primary={p.name}
-                                secondary={p.id === myPlayerId ? "Siz" : (revealedCells[p.id] ? "Görünür" : "Gizli")}
-                            />
-                        </ListItem>
-                    ))}
+                    {players.map((p) => {
+                        const isVisible = (p.revealedTo && p.revealedTo[myPlayerId]);
+                        return (
+                            <ListItem
+                                key={p.id}
+                                button
+                                onClick={() => handleRequestReveal(p.id)}
+                                disabled={p.id === myPlayerId}
+                            >
+                                <ListItemAvatar>
+                                    <Avatar sx={{ bgcolor: p.color }}>{p.name[0]}</Avatar>
+                                </ListItemAvatar>
+                                <ListItemText
+                                    primary={p.name}
+                                    secondary={p.id === myPlayerId ? "Siz" : (isVisible ? "Görünür" : "Gizli")}
+                                />
+                            </ListItem>
+                        )
+                    })}
                 </List>
                 <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <Button variant="outlined" color="primary" fullWidth onClick={handleExitRoom}>

@@ -1,7 +1,12 @@
-import React, { useState, useContext } from 'react';
+import React, { useState } from 'react';
 import { TextField, Button, Container, Box, Typography, Alert, MenuItem, Select, InputLabel, FormControl } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { SocketContext } from '../App';
+import { ref, get, update } from "firebase/database";
+import { db } from '../firebase';
+
+function generateId() {
+    return Math.random().toString(36).substr(2, 9);
+}
 
 const colors = [
     { name: 'Red', hex: '#f44336' },
@@ -17,24 +22,44 @@ function JoinGame() {
     const [playerColor, setPlayerColor] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
-    const socket = useContext(SocketContext);
     const navigate = useNavigate();
 
-    const handleJoin = () => {
+    const handleJoin = async () => {
         if (!playerName || !playerColor || !password) {
             setError("Lütfen tüm alanları doldurunuz.");
             return;
         }
 
-        socket.emit('join_game', { playerName, playerColor, password });
+        const roomRef = ref(db, 'rooms/' + password);
+        const snapshot = await get(roomRef);
 
-        socket.once('joined_success', (data) => {
-            navigate('/game', { state: { password, isHost: false, playerName, playerColor } });
+        if (!snapshot.exists()) {
+            setError("Oda bulunamadı. Şifreyi kontrol edin.");
+            return;
+        }
+
+        const roomData = snapshot.val();
+        if (roomData.isStarted) {
+            setError("Oyun zaten başladı.");
+            return;
+        }
+
+        const playerId = generateId();
+        const newPlayer = {
+            id: playerId,
+            name: playerName,
+            color: playerColor,
+            selectedCell: "",
+            revealedTo: {}
+        };
+
+        // Add player using update to avoid overwriting others (using object with key)
+        // Path: rooms/password/players/playerId
+        await update(ref(db, `rooms/${password}/players`), {
+            [playerId]: newPlayer
         });
 
-        socket.once('error', (msg) => {
-            setError(msg);
-        });
+        navigate('/game', { state: { password, isHost: false, playerName, playerColor, myPlayerId: playerId } });
     };
 
     return (
@@ -47,7 +72,7 @@ function JoinGame() {
                 gap: 3
             }}>
                 <Typography variant="h4" gutterBottom>
-                    Oyuna Katıl
+                    Oyuna Katıl (Firebase)
                 </Typography>
 
                 {error && <Alert severity="error">{error}</Alert>}
