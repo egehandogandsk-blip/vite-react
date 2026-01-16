@@ -3,7 +3,6 @@ import { TextField, Button, Container, Box, Typography, Alert } from '@mui/mater
 import { useNavigate } from 'react-router-dom';
 import { ref, set, get } from "firebase/database";
 import { db } from '../firebase';
-import { v4 as uuidv4 } from 'uuid'; // We need uuid for host ID since no socket ID
 
 // Simple UUID generator if uuid package not installed (it was in server package but check client)
 // Client didn't have uuid installed in previous steps, let's use a simple random string function
