@@ -4,6 +4,7 @@
     "description": "Root script for deployment",
     "scripts": {
         "install-all": "cd client && npm install && cd ../server && npm install",
+        "render-build": "cd client && npm install && npm run build && cd ../server && npm install",
         "build": "cd client && npm run build",
         "start": "cd server && npm start"
     },
