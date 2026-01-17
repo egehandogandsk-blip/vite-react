@@ -69,6 +69,7 @@ function GameRoom() {
 
     const handleSelectCell = (cellId) => {
         if (selectedCell === cellId) return;
+        if (!myPlayerId) return;
         setSelectedCell(cellId);
         // Update my selected cell
         update(ref(db, `rooms/${password}/players/${myPlayerId}`), { selectedCell: cellId });
@@ -184,7 +185,7 @@ function GameRoom() {
                         {players.map((p) => (
                             <ListItem key={p.id}>
                                 <ListItemAvatar>
-                                    <Avatar sx={{ bgcolor: p.color }}>{p.name[0]}</Avatar>
+                                    <Avatar sx={{ bgcolor: p.color || '#ccc' }}>{p.name ? p.name[0] : '?'}</Avatar>
                                 </ListItemAvatar>
                                 <ListItemText primary={p.name} secondary={p.id === roomData.hostId ? 'Host' : 'Oyuncu'} />
                             </ListItem>
@@ -219,7 +220,7 @@ function GameRoom() {
                                 disabled={p.id === myPlayerId}
                             >
                                 <ListItemAvatar>
-                                    <Avatar sx={{ bgcolor: p.color }}>{p.name[0]}</Avatar>
+                                    <Avatar sx={{ bgcolor: p.color || '#ccc' }}>{p.name ? p.name[0] : '?'}</Avatar>
                                 </ListItemAvatar>
                                 <ListItemText
                                     primary={p.name}
