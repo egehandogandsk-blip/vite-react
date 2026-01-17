@@ -227,7 +227,21 @@ function GameRoom() {
                 <Typography variant="h6" gutterBottom>Oyuncular</Typography>
                 <List>
                     {players.map((p) => {
-                        const isVisible = (p.revealedTo && p.revealedTo[myPlayerId]);
+                        const revealedVal = p.revealedTo && p.revealedTo[myPlayerId];
+                        const isVisible = revealedVal === true || (typeof revealedVal === 'number' && revealedVal > now);
+
+                        let statusText = "Gizli";
+                        if (p.id === myPlayerId) {
+                            statusText = "Siz";
+                        } else if (isVisible) {
+                            if (typeof revealedVal === 'number') {
+                                const secondsLeft = Math.ceil((revealedVal - now) / 1000);
+                                statusText = `Görünür (${secondsLeft}s)`;
+                            } else {
+                                statusText = "Görünür";
+                            }
+                        }
+
                         return (
                             <ListItem
                                 key={p.id}
@@ -240,11 +254,7 @@ function GameRoom() {
                                 </ListItemAvatar>
                                 <ListItemText
                                     primary={p.name}
-                                    secondary={
-                                        p.id === myPlayerId
-                                            ? "Siz"
-                                            : (isVisible ? `Görünür (${Math.ceil((p.revealedTo[myPlayerId] - now) / 1000)}s)` : "Gizli")
-                                    }
+                                    secondary={statusText}
                                 />
                             </ListItem>
                         )
