@@ -90,6 +90,14 @@ function GameRoom() {
         alert("İstek gönderildi.");
     };
 
+    // Countdown state to force re-render
+    const [now, setNow] = useState(Date.now());
+
+    useEffect(() => {
+        const timer = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(timer);
+    }, []);
+
     const handleRespondReveal = (accepted) => {
         if (requestDialog) {
             // Update request status
@@ -98,9 +106,11 @@ function GameRoom() {
 
             if (accepted) {
                 // Grant permission: Add requester to my revealedTo list
-                // storing as { requesterId: true }
+                // storing as { requesterId: EXPIRATION_TIMESTAMP }
+                // 10 seconds from now
+                const expirationTime = Date.now() + 10000;
                 update(ref(db, `rooms/${password}/players/${myPlayerId}/revealedTo`), {
-                    [requestDialog.from]: true
+                    [requestDialog.from]: expirationTime
                 });
             }
 
@@ -114,9 +124,15 @@ function GameRoom() {
 
     const getVisibleCell = (player) => {
         if (player.id === myPlayerId) return selectedCell; // Local state for immediate feedback
-        // Check if player revealed to me
+
         if (player.revealedTo && player.revealedTo[myPlayerId]) {
-            return player.selectedCell;
+            const expiration = player.revealedTo[myPlayerId];
+            // Check if it's a number (timestamp) and future
+            if (typeof expiration === 'number' && expiration > now) {
+                return player.selectedCell;
+            }
+            // Backward compatibility for boolean true (permanent) - optional, but good for safety
+            if (expiration === true) return player.selectedCell;
         }
         return null;
     };
