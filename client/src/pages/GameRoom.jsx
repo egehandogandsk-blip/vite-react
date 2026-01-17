@@ -224,7 +224,11 @@ function GameRoom() {
                                 </ListItemAvatar>
                                 <ListItemText
                                     primary={p.name}
-                                    secondary={p.id === myPlayerId ? "Siz" : (isVisible ? "Görünür" : "Gizli")}
+                                    secondary={
+                                        p.id === myPlayerId
+                                            ? "Siz"
+                                            : (isVisible ? `Görünür (${Math.ceil((p.revealedTo[myPlayerId] - now) / 1000)}s)` : "Gizli")
+                                    }
                                 />
                             </ListItem>
                         )
